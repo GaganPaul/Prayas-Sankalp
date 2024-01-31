@@ -1,0 +1,10 @@
+# Ignore Node.js modules
+node_modules/
+
+# Ignore ZIP files named public.zip
+public.zip
+
+# Ignore the entire test directory
+test/
+
+uploads/
