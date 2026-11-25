@@ -1,131 +1,76 @@
 const express = require('express');
+const { MongoClient, ObjectId } = require('mongodb');
 const bodyParser = require('body-parser');
-const cors = require('cors');
-const admin = require('firebase-admin');
-const jwt = require('jsonwebtoken');
-const crypto = require('crypto');
+const multer = require('multer');
+const path = require('path');
 
 const app = express();
-const port = 4000;
+const port = 3000;
 
-// Generate a random secret key
-const secretKey = crypto.randomBytes(32).toString('hex');
-console.log(secretKey);
-
-app.use(cors());
 app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: true }));
 
-// Use the correct environment variable name
-const jwtSecret = process.env.JWT_SECRET;
-
-// Initialize Firebase Admin SDK
-const serviceAccount = require('./public/key/serviceAccountKeyy.json');
-admin.initializeApp({
-    credential: admin.credential.cert(serviceAccount),
-    databaseURL: "https://registeration-e2a50-default-rtdb.firebaseio.com" // Replace with your Firebase project URL
+// Multer configuration for handling file uploads
+const storage = multer.diskStorage({
+    destination: function (req, file, cb) {
+        cb(null, 'uploads/'); // Specify the directory to store uploaded files
+    },
+    filename: function (req, file, cb) {
+        cb(null, Date.now() + path.extname(file.originalname)); // Generate a unique filename
+    }
 });
 
-// Function to verify and decode the JWT token
-const verifyTokenAndGetUserId = async (idToken) => {
-    try {
-        const decodedToken = await admin.auth().verifyIdToken(idToken);
-        return decodedToken.uid;
-    } catch (error) {
-        console.error('Error verifying token:', error);
-        throw error;
-    }
-};
+const upload = multer({ storage: storage });
 
-// Function to retrieve user data based on userId
-const getUserData = async (userId) => {
-    try {
-        const snapshot = await admin.database().ref(`users/${userId}`).once('value');
-        return snapshot.val();
-    } catch (error) {
-        throw error;
-    }
-};
-
-// Generate JWT token
-const generateToken = (uid) => {
-    return jwt.sign({ uid }, jwtSecret, { expiresIn: '1h' });
-};
-
-// Generic error-handling middleware
-app.use((err, req, res, next) => {
-    console.error('Error:', err);
-    res.status(500).json({ message: 'Internal server error' });
+app.get('/', (req, res) => {
+    res.sendFile(path.join(__dirname, 'SellerForm.html'));
 });
 
-// Handle user registration
-app.post('/register', async (req, res, next) => {
-    try {
-        const { email, password, username } = req.body;
+const mongoURI = 'mongodb://localhost:27017';
+const client = new MongoClient(mongoURI);
 
-        // Implement your registration logic here, create user account, etc.
-        const userCredential = await admin.auth().createUser({
-            email: email,
-            password: password,
-            displayName: username,
+client.connect()
+    .then(() => {
+        console.log('Connected to MongoDB');
+    })
+    .catch(err => {
+        console.error('Error connecting to MongoDB:', err);
+    });
+
+const database = client.db('Prayass-SankalpDB');
+const foodCollection = database.collection('sellers');
+const refurbishedCollection = database.collection('refurbishedproducts');
+
+app.post('/submitSellerForm/sellers', upload.single('foodImage'), (req, res) => {
+    const formData = req.body;
+    formData.foodImage = req.file.filename; // Add the filename to formData
+
+    foodCollection.insertOne(formData)
+        .then(result => {
+            console.log('Data inserted into food collection:', result);
+            res.send('Form submitted successfully');
+        })
+        .catch(err => {
+            console.error('Error inserting data into food collection:', err);
+            res.status(500).send('Internal Server Error');
         });
+});
 
-        // Add user data to the Firebase Realtime Database
-        await admin.database().ref(`users/${userCredential.uid}`).set({
-            username: username,
-            email: email
+app.post('/submitSellerForm/refurbishedproducts', upload.single('productImage'), (req, res) => {
+    const formData = req.body;
+    formData.productImage = req.file.filename; // Add the filename to formData
+
+    refurbishedCollection.insertOne(formData)
+        .then(result => {
+            console.log('Data inserted into refurbished collection:', result);
+            res.send('Form submitted successfully');
+        })
+        .catch(err => {
+            console.error('Error inserting data into refurbished collection:', err);
+            res.status(500).send('Internal Server Error');
         });
-
-        const token = generateToken(userCredential.uid);
-
-        res.status(200).json({ message: 'User registered successfully', token });
-    } catch (error) {
-        next(error);
-    }
 });
 
-// Handle user login
-app.post('/login', async (req, res) => {
-    try {
-        const { email, password } = req.body;
-
-        // Implement your login logic here, validate credentials, etc.
-        const userCredential = await admin.auth().signInWithEmailAndPassword(email, password);
-
-        const token = generateToken(userCredential.user.uid);
-
-        res.status(200).json({ message: 'Signed in successfully', token });
-    } catch (error) {
-        console.error('Error during login:', error);
-        res.status(401).json({ message: 'Invalid login credentials' });
-    }
-});
-
-// Retrieve user data
-app.get('/user', async (req, res, next) => {
-    const idToken = req.headers.authorization;
-
-    try {
-        // Verify token and retrieve user data
-        const userId = await verifyTokenAndGetUserId(idToken);
-
-        // Retrieve user data based on userId
-        const userData = await getUserData(userId);
-
-        // Set Content-Type header
-        res.setHeader('Content-Type', 'application/json');
-
-        // Send JSON response
-        res.status(200).json(userData);
-    } catch (error) {
-        next(error);
-    }
-});
-
-// Serve static files (HTML, CSS, etc.)
-app.use(express.static('public'));
-
-// Start the server
 app.listen(port, () => {
     console.log(`Server is running at http://localhost:${port}`);
 });
